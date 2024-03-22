@@ -1,3 +1,8 @@
+engine/
+weights/
+*.nsys-rep
+*.cache
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
