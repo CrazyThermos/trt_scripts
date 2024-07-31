@@ -23,6 +23,7 @@ import numpy as np
 import tensorrt as trt
 import argparse
 from PIL import ImageDraw
+from PIL import Image
 
 # from data_processing import PreprocessYOLO, PostprocessYOLO, ALL_CATEGORIES
 
@@ -59,8 +60,17 @@ TRT_LOGGER = trt.Logger()
 #     args = parser.parse_args()
 #     return args
 
-def get_engine(onnx_file_path, engine_file_path="", shape=None):
+def get_engine(onnx_file_path, engine_file_path="", shape=None, build_model=False):
     """Attempts to load a serialized engine if available, otherwise builds a new TensorRT engine and saves it."""
+    if not build_model:
+        # 设置TensorRT日志级别
+        TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+        # 创建TensorRT Runtime对象
+        runtime = trt.Runtime(TRT_LOGGER)
+        with open(engine_file_path, 'rb') as f:
+            engine_data = f.read()
+        engine = runtime.deserialize_cuda_engine(engine_data)
+        return engine
 
     def build_engine():
         """Takes an ONNX file and creates a TensorRT engine to run inference with"""
@@ -107,33 +117,67 @@ def get_engine(onnx_file_path, engine_file_path="", shape=None):
         return build_engine()
 
 
-def main(onnx_file_path, engine_file_path="", shape=None):
+def main(onnx_file_path, int8_engine_file_path="", fp16_engine_file_path="", shape=None, build_model=False):
     """Create a TensorRT engine for ONNX-based YOLOv3-608 and run inference."""
 
     # Try to load a previously generated YOLOv3-608 network graph in ONNX format:
     # Do inference with TensorRT
-    trt_outputs = []
-    with get_engine(onnx_file_path, engine_file_path, shape) as engine, engine.create_execution_context() as context:
+    int8_trt_outputs = []
+    with get_engine(onnx_file_path, int8_engine_file_path, shape, build_model) as engine, engine.create_execution_context() as context:
         inputs, outputs, bindings, stream = common.allocate_buffers(engine)
         # Do inference
         # print("Running inference on image {}...".format(input_image_path))
         # Set host input to the image. The common.do_inference function will copy the input to the GPU before executing.
         low_res_h = shape[2]
         low_res_w = shape[3]
-        x = np.ones((1, 3, low_res_h, low_res_w),dtype=np.float32)
-        inputs[0].host = x
+        # x = np.ones((1, 3, low_res_h, low_res_w),dtype=np.float32)
+        imrgb_arr =  np.transpose(np.expand_dims(np.array(np.resize(Image.open('./datasets/m3fd/00000_rgb.png'),(shape[1],low_res_h, low_res_w)), dtype=np.float32), 0), (0,3,1,2)) / 255.0
+        imt_arr =  np.transpose(np.expand_dims(np.array(np.resize(Image.open('./datasets/m3fd/00000_t.png'),(shape[1],low_res_h, low_res_w)), dtype=np.float32), 0), (0,3,1,2)) / 255.0
+        inp = np.concatenate((imrgb_arr, imt_arr), 0)
+        # inputs[0].host = x
+        inputs[0].host = inp
         # inputs[1].host = x
         time_start = time.time()  
-        trt_outputs = common.do_inference_v2(context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
+        int8_trt_outputs = common.do_inference_v2(context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
         time_end = time.time()  
         print("inference_time:{}",time_end-time_start)
-
+        int8_trt_outputs = int8_trt_outputs[0]
+        # image_array = (trt_outputs * 255).astype(np.uint8)
+        # image_pil = Image.fromarray(image_array, mode="RGB")
+        # image_pil.save('output_image_trt.png', 'PNG')
+    
+    fp16_trt_outputs = []
+    with get_engine(onnx_file_path, fp16_engine_file_path, shape, build_model) as engine, engine.create_execution_context() as context:
+        inputs, outputs, bindings, stream = common.allocate_buffers(engine)
+        # Do inference
+        # print("Running inference on image {}...".format(input_image_path))
+        # Set host input to the image. The common.do_inference function will copy the input to the GPU before executing.
+        low_res_h = shape[2]
+        low_res_w = shape[3]
+        # x = np.ones((1, 3, low_res_h, low_res_w),dtype=np.float32)
+        imrgb_arr =  np.transpose(np.expand_dims(np.array(np.resize(Image.open('./datasets/m3fd/00000_rgb.png'),(shape[1],low_res_h, low_res_w)), dtype=np.float32), 0), (0,3,1,2)) / 255.0
+        imt_arr =  np.transpose(np.expand_dims(np.array(np.resize(Image.open('./datasets/m3fd/00000_t.png'),(shape[1],low_res_h, low_res_w)), dtype=np.float32), 0), (0,3,1,2)) / 255.0
+        inp = np.concatenate((imrgb_arr, imt_arr), 0)
+        # inputs[0].host = x
+        inputs[0].host = inp
+        # inputs[1].host = x
+        time_start = time.time()  
+        fp16_trt_outputs = common.do_inference_v2(context, bindings=bindings, inputs=inputs, outputs=outputs, stream=stream)
+        time_end = time.time()  
+        print("inference_time:{}",time_end-time_start)
+        fp16_trt_outputs = fp16_trt_outputs[0]
+        # image_array = (trt_outputs * 255).astype(np.uint8)
+        # image_pil = Image.fromarray(image_array, mode="RGB")
+        # image_pil.save('output_image_trt.png', 'PNG')
+    pass
 
 
 if __name__ == "__main__":
-    onnx_file_path = "./weights/yolox_s_cprelu_608x1088.onnx"
+    onnx_file_path = "./weights/fusion.onnx"
     # onnx_file_path = "./weights/t1ven.onnx"
-    engine_file_path = "yolox_s_cprelu_608x1088.trt"
+    int8_engine_file_path = "./engine/rgbt_yolov5_m3fd_op13_one_input_int8_SYMM_LINEAR_PERCHANNEL_dynamic_quantized.engine"
+    fp16_engine_file_path = "./engine/rgbt_yolov5_m3fd_debug_b2_op13_one_input.engine"
+
     # engine_file_path = "t1ven.trt"
-    shape = [1,3,608,1088]
-    main(onnx_file_path, engine_file_path, shape)
+    shape = [1,3,640,640]
+    main(onnx_file_path, int8_engine_file_path, fp16_engine_file_path, shape, build_model=False)

@@ -1,5 +1,5 @@
-engine/
-weights/
+engine/*
+weights/*
 *.nsys-rep
 *.cache
 

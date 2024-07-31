@@ -33,7 +33,9 @@ def build_engine(
     fp16: bool = True, int8: bool = False, 
     int8_scale_file: str = None,
     explicit_batch: bool = True, 
-    workspace: int = 4294967296<<8, # 4GB
+    dynamic_shapes: map = {},
+    dynamic_batch_size:int = 32,
+    workspace: int = 4294967296<<4, # 4GB
     ):
     TRT_LOGGER = trt.Logger()
     """
@@ -60,7 +62,20 @@ def build_engine(
 
     parser = trt.OnnxParser(network, TRT_LOGGER)
     config.max_workspace_size = workspace
+    # config.builder_optimization_level
+    # builder.max_batch_size = 
 
+    if len(dynamic_shapes) > 0:
+        print(f"===> using dynamic shapes: {str(dynamic_shapes)}")
+        builder.max_batch_size = dynamic_batch_size
+        profile = builder.create_optimization_profile()
+
+        for binding_name, dynamic_shape in dynamic_shapes.items():
+            min_shape, opt_shape, max_shape = dynamic_shape
+            profile.set_shape(
+                binding_name, min_shape, opt_shape, max_shape)
+
+        config.add_optimization_profile(profile)
     if not os.path.exists(onnx_file):
         raise FileNotFoundError(f'ONNX file {onnx_file} not found')
 
@@ -75,7 +90,7 @@ def build_engine(
     if int8_scale_file is not None and int8:
         config.set_flag(trt.BuilderFlag.INT8)
         setDynamicRange(network, int8_scale_file)
-
+    
     engine = builder.build_engine(network, config)
 
     with open(engine_file, "wb") as f:
@@ -83,7 +98,9 @@ def build_engine(
 
 
 if __name__ == "__main__":
-        build_engine(onnx_file='weights/yolov5s_nc3_bs32_op13_quantized.onnx', 
-                 int8_scale_file='weights/yolov5s_nc3_bs32_op13_quantized.json', 
-                 engine_file='engine/yolov5s_nc3_bs32_op13_quantized.engine', 
+        build_engine(onnx_file='/workspace/yuhang/trt_scripts/weights/rgbt_yolov5_m3fd_op13_one_input_int8_SYMM_LINEAR_PERCHANNEL_dynamic_quantized.onnx', 
+                 int8_scale_file='/workspace/yuhang/trt_scripts/weights/rgbt_yolov5_m3fd_op13_one_input_int8_SYMM_LINEAR_PERCHANNEL_dynamic_quantized.json', 
+                 engine_file='./engine/rgbt_yolov5_m3fd_op13_one_input_int8_SYMM_LINEAR_PERCHANNEL_dynamic_quantized.engine', 
+                 dynamic_shapes={'input' : [(2,3,640,640),(2,3,640,640),(2,3,640,640)]}, # 'input1' : [(1,3,640,640),(1,3,640,640),(1,3,640,640)]},
                  int8=True)
+
