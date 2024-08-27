@@ -50,4 +50,5 @@ trtexec  --loadEngine=./engine/rgbt_ca_rtdetrv2_589_m3fd_one_input_SYMM_LINEAR_P
         --shapes=input:2x3x640x640 \
         --workspace=4096 \
         --useSpinWait \
+        --useCudaGraph \
         --int8		
